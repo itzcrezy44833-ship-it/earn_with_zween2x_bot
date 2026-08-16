@@ -11,7 +11,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 # --- BOT CONFIGURATION ---
 BOT_TOKEN = "8715542575:AAGg6jBTdnBjiWU7h0U-Ub_6tqPElh2fGVA"
-ADMIN_ID = 8374129050  # Aapki Telegram User ID set ho gayi hai
+ADMIN_ID = 8374129050
 
 WAITING_FOR_PROOF, WAITING_FOR_UPI, WAITING_FOR_TASK_DATA = range(3)
 
@@ -26,7 +26,6 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS submissions 
                       (sub_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, task_id INTEGER, status TEXT DEFAULT 'PENDING')''')
     
-    # Default Demo Task
     cursor.execute('SELECT COUNT(*) FROM tasks')
     if cursor.fetchone()[0] == 0:
         cursor.execute("INSERT INTO tasks (title, reward, link, instructions) VALUES ('Demat Account Sign Up', 100.0, 'https://example.com', 'Account open karke final screenshot bhejein.')")
@@ -176,7 +175,7 @@ async def receive_admin_task(update: Update, context: ContextTypes.DEFAULT_TYPE)
         conn.commit()
         conn.close()
         await update.message.reply_text("✅ Naya Task Successfully Live ho gaya hai!")
-    except Exception as e:
+    except Exception:
         await update.message.reply_text(f"⚠️ Error Format! Is tarah se likhein:\n`Demat Account | 100 | https://link.com | Account kholein`")
     return ConversationHandler.END
 
