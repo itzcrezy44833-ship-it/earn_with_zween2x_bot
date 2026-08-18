@@ -53,7 +53,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.id == ADMIN_ID: 
         keyboard.append([InlineKeyboardButton("⚙️ Admin Panel", callback_data='admin_panel')])
     
-    await update.message.reply_text(f"Namaste {user.first_name}! z.ween2x Network mein swagat hai.", reply_markup=InlineKeyboardMarkup(keyboard))
+    # 1. Updated Welcome Message
+    welcome_text = (
+        f"Namste {user.first_name} z.ween2x pvt.ltd network main aapka swagat hain "
+        f"aapka din subh ho or apna kimti waqt Dene ke liye hum aapke aabhari hain"
+    )
+    
+    await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
     return ConversationHandler.END
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -120,8 +126,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
         bal = row[0] if row else 0.0
         upi = row[1] if row and row[1] else ""
-        if bal < 50:
-            await query.edit_message_text("⚠️ Minimum Withdrawal ₹50 hai.")
+        
+        # 2. Updated Withdrawal Limit (₹100)
+        if bal < 100:
+            await query.edit_message_text("⚠️ Minimum Withdrawal ₹100 hai.")
         elif not upi:
             await query.edit_message_text("⚠️ Pehle 'Set UPI' par click karke apni UPI ID set karein.")
         else:
@@ -168,7 +176,13 @@ async def receive_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard, parse_mode='Markdown'
         )
         
-    await update.message.reply_text("✅ AAPKA PROOF SUBMIT HO GAYA HAI! Admin review karke reward add kar dega.")
+    # 3. Updated Task Submission Message
+    proof_submitted_text = (
+        "✅ AAPKA PROOF SUBMIT HO GAYA HAI!\n\n"
+        "Aapne jo aaj task pure kiye hain uska Paisa aapke account main 48ghante ke under add kr diya jayega "
+        "jisko aap 100+ hojane pr widrawal kr sakte hain any kisi information or problem ke liye @zween2x se sampark kr sakte hain"
+    )
+    await update.message.reply_text(proof_submitted_text)
     return ConversationHandler.END
 
 async def receive_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
