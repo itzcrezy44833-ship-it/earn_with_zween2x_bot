@@ -53,7 +53,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.id == ADMIN_ID: 
         keyboard.append([InlineKeyboardButton("⚙️ Admin Panel", callback_data='admin_panel')])
     
-    # 1. Updated Welcome Message
     welcome_text = (
         f"Namste {user.first_name} z.ween2x pvt.ltd network main aapka swagat hain "
         f"aapka din subh ho or apna kimti waqt Dene ke liye hum aapke aabhari hain"
@@ -99,8 +98,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['current_task'] = task_id
         context.user_data['task_reward'] = task[1]
         conn.close()
-        await query.edit_message_text(f"📌 Task: {task[0]}\n💵 Reward: ₹{task[1]}\n📋 Instructions: {task[3]}\n\nApna Proof/WhatsApp Number bhejane ke liye niche button dabayein:", 
-                                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Submit Proof / Number", callback_data='submit_proof')]]))
+
+        # UPDATED: Link Button aur Submit Proof Button dono add kar diye hain
+        task_buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔗 Open Link", url=task[2])],
+            [InlineKeyboardButton("Submit Proof / Number", callback_data='submit_proof')]
+        ])
+
+        task_text = (
+            f"📌 **Task:** {task[0]}\n"
+            f"💵 **Reward:** ₹{task[1]}\n"
+            f"📋 **Instructions:** {task[3]}\n\n"
+            f"Pehle upar diye gaye link par click karke task poora karein, phir 'Submit Proof' par click karein."
+        )
+
+        await query.edit_message_text(
+            text=task_text,
+            reply_markup=task_buttons,
+            parse_mode='Markdown'
+        )
         return ConversationHandler.END
 
     elif data == 'submit_proof':
@@ -127,7 +143,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bal = row[0] if row else 0.0
         upi = row[1] if row and row[1] else ""
         
-        # 2. Updated Withdrawal Limit (₹100)
         if bal < 100:
             await query.edit_message_text("⚠️ Minimum Withdrawal ₹100 hai.")
         elif not upi:
@@ -176,7 +191,6 @@ async def receive_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard, parse_mode='Markdown'
         )
         
-    # 3. Updated Task Submission Message
     proof_submitted_text = (
         "✅ AAPKA PROOF SUBMIT HO GAYA HAI!\n\n"
         "Aapne jo aaj task pure kiye hain uska Paisa aapke account main 48ghante ke under add kr diya jayega "
