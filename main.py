@@ -69,7 +69,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect('microtask_system.db')
     cursor = conn.cursor()
     
-    # Check or Insert User
     cursor.execute('SELECT phone_number, is_verified FROM users WHERE user_id = ?', (user.id,))
     user_data = cursor.fetchone()
     
@@ -110,7 +109,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return WAITING_FOR_PHONE
 
-    # Step 3: Already Verified - Show Main Dashboard
+    # Step 3: Already Verified - Show Dashboard
     return await show_dashboard(update, context, user)
 
 async def show_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE, user):
@@ -123,8 +122,8 @@ async def show_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE, use
         keyboard.append([InlineKeyboardButton("⚙️ Admin Panel", callback_data='admin_panel')])
 
     welcome_text = (
-        f"Namaste {user.first_name}! z.ween2x pvt.ltd network main aapka swagat hai.\n"
-        f"Aapka din shubh ho aur apna keemti waqt dene ke liye hum aapke aabhari hain."
+        f"Namaste {user.first_name} z.ween2x pvt.ltd network main aapka swagat hain "
+        f"aapka din subh ho or apna kimti waqt Dene ke liye hum aapke aabhari hain"
     )
     
     if update.callback_query:
@@ -145,6 +144,13 @@ async def receive_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         conn.close()
 
+        # Admin alert notification
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"🚨 **NEW USER SIGNUP DETECTED!**\n\n👤 **Name:** {user.first_name}\n🆔 **User ID:** `{user.id}`\n📱 **Mobile:** `{phone_number}`\n📢 **Channel Status:** Joined ✅",
+            parse_mode='Markdown'
+        )
+
         await update.message.reply_text(
             f"✅ **Signup Successful!**\nMobile: `{phone_number}` verify ho gaya hai.",
             reply_markup=ReplyKeyboardRemove(),
@@ -154,6 +160,27 @@ async def receive_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Kripya apna khud ka contact share karne ke liye button par tap karein!")
         return WAITING_FOR_PHONE
+
+async def get_users_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        return
+    
+    conn = sqlite3.connect('microtask_system.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id, phone_number, balance FROM users WHERE is_verified = 1')
+    verified_users = cursor.fetchall()
+    conn.close()
+
+    if not verified_users:
+        await update.message.reply_text("Abhi tak koi verified user nahi hai.")
+        return
+
+    text = f"📊 **TOTAL REGISTERED USERS:** {len(verified_users)}\n\n"
+    for u in verified_users:
+        text += f"👤 ID: `{u[0]}` | 📱 Mob: `{u[1]}` | 💰 Bal: ₹{u[2]}\n"
+    
+    await update.message.reply_text(text, parse_mode='Markdown')
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -168,7 +195,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         is_joined = await check_channel_membership(user.id, context)
         if is_joined:
             await query.edit_message_text("✅ Channel Verified!")
-            # Trigger Signup Flow
             return await start(query, context)
         else:
             await query.answer("❌ Aapne abhi tak channel join nahi kiya hai!", show_alert=True)
@@ -381,6 +407,7 @@ if __name__ == '__main__':
             fallbacks=[CommandHandler("start", start)],
             allow_reentry=True
         )
+        app.add_handler(CommandHandler("users", get_users_list))
         app.add_handler(conv)
         app.add_handler(CallbackQueryHandler(admin_approval, pattern="^(app_|rej_)"))
         app.run_polling()
