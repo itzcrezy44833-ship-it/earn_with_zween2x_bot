@@ -3,7 +3,7 @@ import logging
 import sqlite3
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler, 
     ContextTypes, MessageHandler, filters, ConversationHandler
@@ -13,8 +13,9 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 8374129050
+CHANNEL_USERNAME = "@zween2x_official"  # Aapka official channel username
 
-WAITING_FOR_PROOF, WAITING_FOR_UPI, WAITING_FOR_TASK_DATA = range(3)
+WAITING_FOR_PROOF, WAITING_FOR_UPI, WAITING_FOR_TASK_DATA, WAITING_FOR_PHONE = range(4)
 
 class HealthCheck(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -30,21 +31,89 @@ def run_dummy_server():
 def init_db():
     conn = sqlite3.connect('microtask_system.db')
     cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, balance REAL DEFAULT 0.0, upi_id TEXT DEFAULT '')''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS tasks (task_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, reward REAL, link TEXT, instructions TEXT)''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY, 
+            balance REAL DEFAULT 0.0, 
+            upi_id TEXT DEFAULT '',
+            phone_number TEXT DEFAULT '',
+            is_verified INTEGER DEFAULT 0
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tasks (
+            task_id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            title TEXT, 
+            reward REAL, 
+            link TEXT, 
+            instructions TEXT
+        )
+    ''')
     conn.commit()
     conn.close()
 
 init_db()
 
+async def check_channel_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    try:
+        member = await context.bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
+        if member.status in ['member', 'administrator', 'creator']:
+            return True
+        return False
+    except Exception as e:
+        logging.error(f"Channel Check Error: {e}")
+        return False
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     conn = sqlite3.connect('microtask_system.db')
     cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user.id,))
-    conn.commit()
-    conn.close()
     
+    # Check or Insert User
+    cursor.execute('SELECT phone_number, is_verified FROM users WHERE user_id = ?', (user.id,))
+    user_data = cursor.fetchone()
+    
+    if not user_data:
+        cursor.execute('INSERT INTO users (user_id) VALUES (?)', (user.id,))
+        conn.commit()
+        is_verified = 0
+    else:
+        is_verified = user_data[1]
+    conn.close()
+
+    # Step 1: Mandatory Channel Join Check
+    is_joined = await check_channel_membership(user.id, context)
+    if not is_joined:
+        join_btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📢 Join Official Channel", url=f"https://t.me/{CHANNEL_USERNAME[1:]}")],
+            [InlineKeyboardButton("✅ Verify Join", callback_data="check_join")]
+        ])
+        await update.message.reply_text(
+            "⚠️ **Aage badhne ke liye pehle humara official channel join karein!**\n\n"
+            "Channel join karne ke baad 'Verify Join' par click karein.",
+            reply_markup=join_btn,
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+
+    # Step 2: Mobile Number Signup Check
+    if not is_verified:
+        phone_keyboard = ReplyKeyboardMarkup(
+            [[KeyboardButton("📲 Share Mobile Number for Signup", request_contact=True)]],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        await update.message.reply_text(
+            f"Namaste {user.first_name}! z.ween2x pvt.ltd network me aapka swagat hai.\n\n"
+            "🔐 Account Verification ke liye niche diye gaye button par click karke apna mobile number share karein:",
+            reply_markup=phone_keyboard
+        )
+        return WAITING_FOR_PHONE
+
+    # Step 3: Already Verified - Show Main Dashboard
+    return await show_dashboard(update, context, user)
+
+async def show_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE, user):
     keyboard = [
         [InlineKeyboardButton("📋 Tasks", callback_data='view_tasks')],
         [InlineKeyboardButton("💰 Wallet", callback_data='my_wallet'), InlineKeyboardButton("💳 Set UPI", callback_data='set_upi')],
@@ -52,21 +121,58 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     if user.id == ADMIN_ID: 
         keyboard.append([InlineKeyboardButton("⚙️ Admin Panel", callback_data='admin_panel')])
-    
+
     welcome_text = (
-        f"Namste {user.first_name} z.ween2x pvt.ltd network main aapka swagat hain "
-        f"aapka din subh ho or apna kimti waqt Dene ke liye hum aapke aabhari hain"
+        f"Namaste {user.first_name}! z.ween2x pvt.ltd network main aapka swagat hai.\n"
+        f"Aapka din shubh ho aur apna keemti waqt dene ke liye hum aapke aabhari hain."
     )
     
-    await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
+    if update.callback_query:
+        await update.callback_query.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
     return ConversationHandler.END
+
+async def receive_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    contact = update.message.contact
+
+    if contact and contact.user_id == user.id:
+        phone_number = contact.phone_number
+        conn = sqlite3.connect('microtask_system.db')
+        cursor = conn.cursor()
+        cursor.execute('UPDATE users SET phone_number = ?, is_verified = 1 WHERE user_id = ?', (phone_number, user.id))
+        conn.commit()
+        conn.close()
+
+        await update.message.reply_text(
+            f"✅ **Signup Successful!**\nMobile: `{phone_number}` verify ho gaya hai.",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode='Markdown'
+        )
+        return await show_dashboard(update, context, user)
+    else:
+        await update.message.reply_text("❌ Kripya apna khud ka contact share karne ke liye button par tap karein!")
+        return WAITING_FOR_PHONE
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    user = query.from_user
     conn = sqlite3.connect('microtask_system.db')
     cursor = conn.cursor()
     data = query.data
+
+    if data == 'check_join':
+        conn.close()
+        is_joined = await check_channel_membership(user.id, context)
+        if is_joined:
+            await query.edit_message_text("✅ Channel Verified!")
+            # Trigger Signup Flow
+            return await start(query, context)
+        else:
+            await query.answer("❌ Aapne abhi tak channel join nahi kiya hai!", show_alert=True)
+            return ConversationHandler.END
 
     if data == 'view_tasks':
         cursor.execute('SELECT task_id, title, reward FROM tasks')
@@ -77,7 +183,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = []
             for t in tasks:
                 keyboard.append([InlineKeyboardButton(f"{t[1]} - ₹{t[2]}", callback_data=f'do_task_{t[0]}')])
-                if query.from_user.id == ADMIN_ID:
+                if user.id == ADMIN_ID:
                     keyboard.append([InlineKeyboardButton(f"❌ Delete Task #{t[0]}", callback_data=f'del_task_{t[0]}')])
             await query.edit_message_text("Available Tasks:", reply_markup=InlineKeyboardMarkup(keyboard))
         conn.close()
@@ -99,7 +205,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['task_reward'] = task[1]
         conn.close()
 
-        # UPDATED: Link Button aur Submit Proof Button dono add kar diye hain
         task_buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔗 Open Link", url=task[2])],
             [InlineKeyboardButton("Submit Proof / Number", callback_data='submit_proof')]
@@ -125,10 +230,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return WAITING_FOR_PROOF
 
     elif data == 'my_wallet':
-        cursor.execute('SELECT balance, upi_id FROM users WHERE user_id = ?', (query.from_user.id,))
+        cursor.execute('SELECT balance, upi_id, phone_number FROM users WHERE user_id = ?', (user.id,))
         row = cursor.fetchone()
         conn.close()
-        await query.edit_message_text(f"💳 Wallet Balance: ₹{row[0]}\n📲 UPI ID: {row[1] if row and row[1] else 'Not Set'}")
+        phone = row[2] if row and row[2] else 'Not Verified'
+        upi = row[1] if row and row[1] else 'Not Set'
+        bal = row[0] if row else 0.0
+        
+        wallet_info = (
+            f"💳 **Wallet Balance:** ₹{bal}\n"
+            f"📱 **Mobile No:** `{phone}`\n"
+            f"📲 **UPI ID:** `{upi}`"
+        )
+        await query.edit_message_text(wallet_info, parse_mode='Markdown')
         return ConversationHandler.END
 
     elif data == 'set_upi':
@@ -137,11 +251,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return WAITING_FOR_UPI
 
     elif data == 'withdraw':
-        cursor.execute('SELECT balance, upi_id FROM users WHERE user_id = ?', (query.from_user.id,))
+        cursor.execute('SELECT balance, upi_id, phone_number FROM users WHERE user_id = ?', (user.id,))
         row = cursor.fetchone()
         conn.close()
         bal = row[0] if row else 0.0
         upi = row[1] if row and row[1] else ""
+        phone = row[2] if row and row[2] else ""
         
         if bal < 100:
             await query.edit_message_text("⚠️ Minimum Withdrawal ₹100 hai.")
@@ -150,12 +265,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             conn = sqlite3.connect('microtask_system.db')
             cursor = conn.cursor()
-            cursor.execute('UPDATE users SET balance = 0 WHERE user_id = ?', (query.from_user.id,))
+            cursor.execute('UPDATE users SET balance = 0 WHERE user_id = ?', (user.id,))
             conn.commit()
             conn.close()
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
-                text=f"🚨 **NEW WITHDRAWAL REQUEST**\n\nUser ID: `{query.from_user.id}`\nAmount: ₹{bal}\nUPI ID: `{upi}`",
+                text=f"🚨 **NEW WITHDRAWAL REQUEST**\n\nUser ID: `{user.id}`\nMobile: `{phone}`\nAmount: ₹{bal}\nUPI ID: `{upi}`",
                 parse_mode='Markdown'
             )
             await query.edit_message_text(f"✅ ₹{bal} ki withdrawal request bhej di gayi hai! Admin review karke UPI ({upi}) par paise bhej dega.")
@@ -253,8 +368,12 @@ if __name__ == '__main__':
         app = ApplicationBuilder().token(BOT_TOKEN).build()
         
         conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(button_handler)], 
+            entry_points=[
+                CommandHandler("start", start),
+                CallbackQueryHandler(button_handler)
+            ], 
             states={
+                WAITING_FOR_PHONE: [MessageHandler(filters.CONTACT, receive_phone)],
                 WAITING_FOR_PROOF: [MessageHandler(filters.PHOTO | (filters.TEXT & ~filters.COMMAND), receive_proof)],
                 WAITING_FOR_UPI: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_upi)],
                 WAITING_FOR_TASK_DATA: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_admin_task)]
@@ -262,7 +381,6 @@ if __name__ == '__main__':
             fallbacks=[CommandHandler("start", start)],
             allow_reentry=True
         )
-        app.add_handler(CommandHandler("start", start))
         app.add_handler(conv)
         app.add_handler(CallbackQueryHandler(admin_approval, pattern="^(app_|rej_)"))
         app.run_polling()
